@@ -14,19 +14,16 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 
 function NotFoundComponent() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-7xl font-bold text-foreground">404</h1>
-        <h2 className="mt-4 text-xl font-semibold text-foreground">Page not found</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          The page you're looking for doesn't exist or has been moved.
-        </p>
-        <div className="mt-6">
-          <Link
-            to="/"
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            Go home
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4" style={{ background: "#FFFBF7" }}>
+      <div className="absolute -top-24 -left-24 w-96 h-96 rounded-full blur-3xl opacity-40" style={{ backgroundImage: "linear-gradient(135deg,#FF3B30,#FF7A00,#FFC700)" }} />
+      <div className="absolute -bottom-24 -right-24 w-[28rem] h-[28rem] rounded-full blur-3xl opacity-40" style={{ backgroundImage: "linear-gradient(135deg,#FFC700,#FF7A00,#FF3B30)" }} />
+      <div className="relative max-w-md text-center">
+        <p className="text-[9rem] md:text-[12rem] font-extrabold leading-none tracking-tighter" style={{ backgroundImage: "linear-gradient(135deg,#FF3B30,#FF7A00,#FFC700)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>404</p>
+        <h2 className="mt-2 text-2xl font-extrabold">This reel doesn't exist.</h2>
+        <p className="mt-2 text-sm font-medium text-black/60">The link you followed may be broken, or the page may have been moved.</p>
+        <div className="mt-8">
+          <Link to="/" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-white font-semibold shadow-[0_10px_30px_-8px_rgba(255,122,0,0.45)]" style={{ backgroundImage: "linear-gradient(135deg,#FF3B30,#FF7A00,#FFC700)" }}>
+            Back to home
           </Link>
         </div>
       </div>
