@@ -3,7 +3,14 @@ import { Nav } from "../components/Nav";
 import { Footer } from "../components/Footer";
 import { platforms } from "../components/platforms";
 import { useState } from "react";
-import { ClipboardPaste, Download, Loader2, Play, Clock, User, Check, RotateCw } from "lucide-react";
+import { ClipboardPaste, Download, Loader2, Play, Clock, User, Check, RotateCw, AlertTriangle, ServerCog } from "lucide-react";
+import {
+  DOWNLOADER_API_URL,
+  buildDownloadUrl,
+  fetchVideoInfo,
+  formatDuration,
+  type VideoInfo,
+} from "@/lib/downloader";
 
 export const Route = createFileRoute("/download")({
   head: () => ({
@@ -17,36 +24,47 @@ export const Route = createFileRoute("/download")({
   component: DownloadPage,
 });
 
-type Stage = "idle" | "fetching" | "ready" | "downloading" | "done";
+type Stage = "idle" | "fetching" | "ready" | "downloading" | "done" | "error";
 
 function DownloadPage() {
   const [url, setUrl] = useState("");
   const [stage, setStage] = useState<Stage>("idle");
   const [format, setFormat] = useState<"MP4" | "MP3">("MP4");
-  const [quality, setQuality] = useState<"1080p" | "720p" | "480p">("1080p");
-  const [progress, setProgress] = useState(0);
+  const [quality, setQuality] = useState("1080p");
+  const [info, setInfo] = useState<VideoInfo | null>(null);
+  const [error, setError] = useState<string>("");
 
   const detectedPlatform = detectPlatform(url);
 
-  const fetchPreview = () => {
+  const fetchPreview = async () => {
     if (!url) return;
     setStage("fetching");
-    setTimeout(() => setStage("ready"), 1400);
+    setError("");
+    setInfo(null);
+    try {
+      const data = await fetchVideoInfo(url.trim());
+      setInfo(data);
+      setQuality(data.qualities[0] ?? "1080p");
+      setStage("ready");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+      setStage("error");
+    }
   };
 
   const startDownload = () => {
+    if (!info) return;
     setStage("downloading");
-    setProgress(0);
-    const id = setInterval(() => {
-      setProgress((p) => {
-        if (p >= 100) {
-          clearInterval(id);
-          setStage("done");
-          return 100;
-        }
-        return p + 6;
-      });
-    }, 140);
+    // The browser handles the actual transfer; the local server streams the file.
+    window.location.href = buildDownloadUrl(info.webpageUrl, format, quality);
+    setTimeout(() => setStage("done"), 2500);
+  };
+
+  const reset = () => {
+    setStage("idle");
+    setUrl("");
+    setInfo(null);
+    setError("");
   };
 
   return (
@@ -58,7 +76,7 @@ function DownloadPage() {
             <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight">
               Download <span className="text-warm-gradient">any video</span>
             </h1>
-            <p className="mt-3 text-lg text-black/70 font-medium">Paste a link — we'll fetch a preview instantly.</p>
+            <p className="mt-3 text-lg text-black/70 font-medium">Paste a link — your local Reelio server does the rest.</p>
           </div>
 
           <div className="mt-10 card-warm p-3 flex flex-col md:flex-row gap-3">
@@ -71,38 +89,64 @@ function DownloadPage() {
               <input
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && fetchPreview()}
                 placeholder="https://www.youtube.com/watch?v=…"
                 className="flex-1 py-3 bg-transparent outline-none"
               />
             </div>
-            <button onClick={fetchPreview} className="btn-warm btn-warm-hover px-6 py-3">
+            <button onClick={fetchPreview} disabled={stage === "fetching"} className="btn-warm btn-warm-hover px-6 py-3 disabled:opacity-60">
               {stage === "fetching" ? <><Loader2 className="animate-spin" size={18} /> Fetching…</> : <>Fetch preview</>}
             </button>
           </div>
 
+          <p className="mt-3 text-xs font-medium text-black/50 flex items-center gap-1.5">
+            <ServerCog size={13} /> Connected to your server at {DOWNLOADER_API_URL}
+          </p>
+
           {stage === "fetching" && (
             <div className="mt-8 card-warm p-6 flex items-center gap-4 animate-fade-up">
               <Loader2 className="animate-spin text-[#FF7A00]" />
-              <p className="font-medium">Fetching preview from {detectedPlatform?.name ?? "source"}…</p>
+              <p className="font-medium">Reading {detectedPlatform?.name ?? "the link"}…</p>
             </div>
           )}
 
-          {(stage === "ready" || stage === "downloading" || stage === "done") && (
+          {stage === "error" && (
+            <div className="mt-8 card-warm p-6 animate-fade-up border-l-4 border-[#FF3B30]">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="text-[#FF3B30] shrink-0 mt-0.5" size={20} />
+                <div>
+                  <p className="font-bold">Couldn't fetch that link</p>
+                  <p className="mt-1 text-sm text-black/70 font-medium break-words">{error}</p>
+                  <button onClick={fetchPreview} className="mt-3 text-sm font-semibold flex items-center gap-1">
+                    <RotateCw size={14} /> Try again
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {info && (stage === "ready" || stage === "downloading" || stage === "done") && (
             <div className="mt-8 card-warm p-6 animate-fade-up">
               <div className="grid md:grid-cols-[280px_1fr] gap-6">
                 <div className="relative aspect-video rounded-2xl bg-warm-gradient overflow-hidden grid place-items-center">
-                  <div className="absolute inset-0 bg-black/20" />
-                  <Play size={40} className="relative text-white" fill="white" />
-                  <span className="absolute bottom-2 right-2 text-xs font-bold bg-black/70 text-white px-2 py-0.5 rounded-md">04:32</span>
+                  {info.thumbnail ? (
+                    <img src={info.thumbnail} alt={info.title} className="absolute inset-0 w-full h-full object-cover" />
+                  ) : (
+                    <>
+                      <div className="absolute inset-0 bg-black/20" />
+                      <Play size={40} className="relative text-white" fill="white" />
+                    </>
+                  )}
+                  <span className="absolute bottom-2 right-2 text-xs font-bold bg-black/70 text-white px-2 py-0.5 rounded-md">
+                    {formatDuration(info.duration)}
+                  </span>
                 </div>
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-widest text-warm-gradient">
-                    {detectedPlatform?.name ?? "YouTube"}
-                  </p>
-                  <h3 className="mt-1 text-xl font-bold leading-tight">Sunset timelapse over the Dolomites — 4K</h3>
+                  <p className="text-xs font-bold uppercase tracking-widest text-warm-gradient">{info.extractor}</p>
+                  <h3 className="mt-1 text-xl font-bold leading-tight">{info.title}</h3>
                   <div className="mt-3 flex items-center gap-4 text-sm text-black/60 font-medium">
-                    <span className="flex items-center gap-1"><User size={14} /> Wandering Frames</span>
-                    <span className="flex items-center gap-1"><Clock size={14} /> 4:32</span>
+                    <span className="flex items-center gap-1"><User size={14} /> {info.uploader}</span>
+                    <span className="flex items-center gap-1"><Clock size={14} /> {formatDuration(info.duration)}</span>
                   </div>
 
                   <div className="mt-6">
@@ -121,7 +165,7 @@ function DownloadPage() {
                     <div className="mt-4">
                       <p className="text-xs font-bold uppercase tracking-widest text-black/60 mb-2">Quality</p>
                       <div className="inline-flex flex-wrap gap-2">
-                        {(["1080p", "720p", "480p"] as const).map((q) => (
+                        {info.qualities.slice(0, 6).map((q) => (
                           <button key={q} onClick={() => setQuality(q)}
                             className={`px-4 py-1.5 rounded-full text-sm font-semibold border transition ${quality === q ? "bg-warm-gradient text-white border-transparent" : "border-black/15 hover:border-[#FF7A00]"}`}>
                             {q}
@@ -140,22 +184,18 @@ function DownloadPage() {
                   </button>
                 )}
                 {stage === "downloading" && (
-                  <div>
-                    <div className="flex items-center justify-between text-sm font-semibold mb-2">
-                      <span>Downloading…</span><span>{progress}%</span>
-                    </div>
-                    <div className="h-3 rounded-full bg-[#FFF6EF] overflow-hidden">
-                      <div className="h-full bg-warm-gradient transition-[width] duration-150" style={{ width: `${progress}%` }} />
-                    </div>
+                  <div className="flex items-center gap-3 p-4 rounded-xl bg-[#FFF6EF] font-semibold">
+                    <Loader2 className="animate-spin text-[#FF7A00]" size={18} />
+                    Preparing your file — the download will start in your browser.
                   </div>
                 )}
                 {stage === "done" && (
                   <div className="flex items-center justify-between gap-3 p-4 rounded-xl bg-[#FFF6EF]">
                     <div className="flex items-center gap-2 font-semibold">
                       <span className="w-8 h-8 rounded-full bg-warm-gradient text-white grid place-items-center"><Check size={16} /></span>
-                      Download complete!
+                      Sent to your downloads!
                     </div>
-                    <button onClick={() => { setStage("idle"); setUrl(""); setProgress(0); }} className="text-sm font-semibold flex items-center gap-1">
+                    <button onClick={reset} className="text-sm font-semibold flex items-center gap-1">
                       <RotateCw size={14} /> Download another
                     </button>
                   </div>
