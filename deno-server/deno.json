@@ -1,0 +1,7 @@
+{
+  "tasks": {
+    "start": "deno run --allow-net --allow-env --allow-run --allow-read main.ts",
+    "start:https": "deno run --allow-net --allow-env --allow-run --allow-read main.ts --https"
+  },
+  "imports": {}
+}
