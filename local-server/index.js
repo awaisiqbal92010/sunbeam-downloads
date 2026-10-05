@@ -87,6 +87,7 @@ app.post("/api/info", requireAuth, async (req, res) => {
     res.json(data);
   } catch (err) {
     if (err.code === "CANCELLED") return;
+    if (err.code === "TIMEOUT") return res.status(504).json({ error: "Timed out", detail: err.message });
     console.error("[info]", err.message);
     res.status(502).json({
       error: "Could not read that link",
@@ -122,13 +123,17 @@ app.get("/api/download", requireAuth, async (req, res) => {
           );
           res.setHeader("Cache-Control", "no-store");
 
-          child.stdout.pipe(res);
+          let bytes = 0;
+          child.stdout.on("data", (d) => (bytes += d.length));
+          // end:false so a failure before the first byte can still be reported
+          // as an error instead of an empty "successful" download.
+          child.stdout.pipe(res, { end: false });
           let stderr = "";
           child.stderr.on("data", (d) => (stderr += d.toString().slice(0, 2000)));
           child.on("error", reject);
           child.on("close", (code) => {
-            if (code === 0 || res.writableEnded) resolve();
-            else reject(new Error(stderr.trim() || `yt-dlp exited with ${code}`));
+            if (code === 0 || bytes > 0) return resolve();
+            reject(new Error(stderr.trim() || `yt-dlp exited with ${code}`));
           });
         }),
       { label: url },
@@ -146,9 +151,16 @@ app.get("/api/download", requireAuth, async (req, res) => {
     res.end();
   } catch (err) {
     if (err.code === "CANCELLED") return;
+    if (err.code === "TIMEOUT") {
+      if (!res.headersSent) return res.status(504).json({ error: "Timed out", detail: err.message });
+      return res.end();
+    }
     console.error("[download]", err.message);
-    if (!res.headersSent) res.status(502).json({ error: "Download failed", detail: err.message.slice(0, 600) });
-    else res.end();
+    if (!res.headersSent) {
+      res.removeHeader("Content-Type");
+      res.removeHeader("Content-Disposition");
+      res.status(502).json({ error: "Download failed", detail: err.message.slice(0, 600) });
+    } else res.end();
   }
 });
 
