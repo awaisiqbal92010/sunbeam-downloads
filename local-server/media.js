@@ -32,7 +32,16 @@ function run(bin, args, { signal, capture = true } = {}) {
     child.on("error", reject);
     child.on("close", (code) => {
       signal?.removeEventListener("abort", onAbort);
-      if (signal?.aborted) return reject(Object.assign(new Error("Cancelled"), { code: "CANCELLED" }));
+      if (signal?.aborted) {
+        // A queue timeout passes its reason through abort(); a client-disconnect
+        // cancel does not. Keep the distinction so handlers can answer timeouts.
+        const reason = signal.reason instanceof Error ? signal.reason : null;
+        return reject(
+          Object.assign(new Error(reason?.message || "Cancelled"), {
+            code: reason ? "TIMEOUT" : "CANCELLED",
+          }),
+        );
+      }
       if (code === 0) resolve(out);
       else reject(Object.assign(new Error(err.trim() || `yt-dlp exited with ${code}`), { stderr: err }));
     });

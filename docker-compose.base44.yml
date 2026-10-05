@@ -1,0 +1,49 @@
+# Base44 development environment for Reelio (TanStack Start frontend + local-server backend).
+# Runs from the cloned source with live reload; never from a prebuilt image.
+services:
+  web:
+    image: oven/bun:1.2
+    working_dir: /app
+    volumes:
+      - .:/app
+    ports:
+      - "3000:3000"
+    environment:
+      # Vite dev server: allow the preview proxy host, bind all interfaces.
+      - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS
+      - CHOKIDAR_USEPOLLING=true
+      # Public URL of the download backend (proxied port 8000 of this sandbox).
+      - VITE_DOWNLOADER_API_URL=https://8000-${BASE44_PUBLIC_HOST_SUFFIX}
+      - VITE_DOWNLOADER_API_KEY=${REELIO_API_KEY:-reelio_dev_cff83785eb74a35272232553e5316a7383dae078325fcfd9}
+    command: ["sh", "-ec", "bun install --frozen-lockfile && exec bun run dev --host 0.0.0.0 --port 3000"]
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    restart: on-failure
+
+  api:
+    image: node:22-bookworm
+    working_dir: /app/local-server
+    volumes:
+      - ./local-server:/app/local-server
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - REELIO_API_KEYS=${REELIO_API_KEY:-reelio_dev_cff83785eb74a35272232553e5316a7383dae078325fcfd9}
+      - REELIO_TOKEN_SECRET=${REELIO_TOKEN_SECRET:-f66fbc928a55af88b5a1d1d2c46c5c412adc6345b5fbeb467b03eccc1d18b1da}
+      - ALLOWED_ORIGINS=https://3000-${BASE44_PUBLIC_HOST_SUFFIX}
+      - MAX_CONCURRENT_DOWNLOADS=2
+      - MAX_CONCURRENT_INFO=4
+      - MAX_QUEUE_LENGTH=20
+    command: ["sh", "-ec", "npm install --no-audit --no-fund && exec node index.js"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
+    restart: on-failure

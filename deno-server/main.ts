@@ -67,7 +67,8 @@ function validKey(key: string | null) {
 async function authorize(req: Request, url: URL): Promise<boolean> {
   if (!authEnabled()) return true;
   const key = req.headers.get("x-api-key") ??
-    (req.headers.get("authorization")?.replace(/^Bearer /i, "") ?? null);
+    req.headers.get("authorization")?.replace(/^Bearer /i, "") ??
+    url.searchParams.get("key");
   if (validKey(key)) return true;
   return await validToken(url.searchParams.get("token") ?? req.headers.get("x-reelio-token"));
 }
@@ -238,16 +239,56 @@ async function handler(req: Request): Promise<Response> {
         const child = new Deno.Command(YTDLP, {
           args: downloadArgs(target, format, quality),
           stdout: "piped",
-          stderr: "null",
+          stderr: "piped",
         }).spawn();
-        return new Response(child.stdout, {
-          headers: {
-            "content-type": format === "mp3" ? "audio/mpeg" : "video/mp4",
-            "content-disposition": `attachment; filename="${safeName(title, format)}"`,
-            "cache-control": "no-store",
-            ...corsHeaders(),
+
+        // Wait for the first chunk: if yt-dlp fails before producing any
+        // output, answer with a real error instead of an empty "successful"
+        // download.
+        const reader = child.stdout.getReader();
+        const first = await reader.read();
+        const fileHeaders = {
+          "content-type": format === "mp3" ? "audio/mpeg" : "video/mp4",
+          "content-disposition": `attachment; filename="${safeName(title, format)}"`,
+          "cache-control": "no-store",
+          ...corsHeaders(),
+        };
+        if (first.done || first.value?.length === 0) {
+          const status = await child.status;
+          if (!status.success) {
+            const stderr = await new Response(child.stderr).text();
+            return json(
+              {
+                error: "Download failed",
+                detail: stderr.slice(0, 600) || `yt-dlp exited with ${status.code}`,
+              },
+              502,
+            );
+          }
+          return new Response(null, { status: 200, headers: fileHeaders });
+        }
+
+        const body = new ReadableStream({
+          start(controller) {
+            controller.enqueue(first.value!);
+            (async () => {
+              try {
+                for (;;) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  controller.enqueue(value);
+                }
+              } catch {
+                /* client disconnect — drop the rest */
+              }
+              controller.close();
+            })();
+          },
+          cancel() {
+            child.kill();
           },
         });
+        return new Response(body, { headers: fileHeaders });
       });
     } catch (e) {
       const msg = String((e as Error).message);
